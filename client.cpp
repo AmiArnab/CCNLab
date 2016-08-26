@@ -38,39 +38,33 @@ int main()
     socketfd = socket(host_info_list->ai_family, host_info_list->ai_socktype,host_info_list->ai_protocol);
     if (socketfd == -1)  std::cout << "socket error " ;
 
-    std::cout << "Binding socket..."  << std::endl;
+    std::cout << "Setting socket options..."  << std::endl;
     int yes = 1;
     status = setsockopt(socketfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
-    status = bind(socketfd, host_info_list->ai_addr, host_info_list->ai_addrlen);
-    if (status == -1)  std::cout << "bind error" << std::endl ;
 
-    std::cout << "Setting up server...\nListening for clients on port 5555 ..."  << std::endl;
-    status =  listen(socketfd, 1);
-    if (status == -1)  std::cout << "listen error" << std::endl ;
+    std::cout << "Setting up client...\nConnecting to server through port 5555 ..."  << std::endl;
+    status = connect(socketfd,host_info_list->ai_addr,host_info_list->ai_addrlen);
+    if (status == -1)  {std::cout << "listen error" << std::endl; exit(EXIT_FAILURE);}
+
+    timeval wt;
+    wt.tv_sec = 1;
+    wt.tv_usec = 0;
+    select(NULL,NULL,NULL,NULL,&wt);
+
+    string wmsg = "Hi Server!\n";
+    write(socketfd,wmsg.data(),wmsg.size());
 
     cout << "Type \"quit\" to exit.\n";
 
     while(true)
     {
-        int act=0;
-        sockaddr their_addr;
-        socklen_t addr_size = sizeof(their_addr);
-        char msg[] = "Hello client!\n";
-
         FD_ZERO(&client_fdset);
         FD_SET(socketfd,&client_fdset);
         FD_SET(STDIN_FILENO,&client_fdset);
-        FD_SET(cfd,&client_fdset);
 
-        maxfd = (cfd > socketfd )?cfd:socketfd;
+        maxfd = (socketfd > STDIN_FILENO)?socketfd:STDIN_FILENO;
 
-        act = pselect(maxfd+1,&client_fdset,NULL,NULL,NULL,NULL);
-
-        if(FD_ISSET(socketfd,&client_fdset))
-        {
-            cfd = accept(socketfd,&their_addr,&addr_size);
-            send(cfd,msg,strlen(msg),0);
-        }
+        pselect(maxfd+1,&client_fdset,NULL,NULL,NULL,NULL);
 
         if(FD_ISSET(STDIN_FILENO,&client_fdset))
         {
@@ -84,23 +78,22 @@ int main()
                 exit(EXIT_SUCCESS);
             }
             msg+='\n';
-            write(cfd,msg.data(),msg.size());
+            write(socketfd,msg.data(),msg.size());
         }
 
-        if(FD_ISSET(cfd,&client_fdset))
+        if(FD_ISSET(socketfd,&client_fdset))
         {
             char buff[1024];
-            int readlen = read(cfd,buff,1023);
+            int readlen = read(socketfd,buff,1023);
             if(readlen==0)
             {
-                cout << "Client disconnected!\n";
-                close(cfd);
+                cout << "Server disconnected!\n";
                 close(socketfd);
                 freeaddrinfo(host_info_list);
                 exit(EXIT_SUCCESS);
             }
             buff[readlen] = '\0';
-            std::cout << cfd << " : " << buff;
+            std::cout << "Server: " << buff;
         }
     }
 
