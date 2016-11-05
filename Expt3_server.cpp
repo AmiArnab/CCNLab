@@ -30,7 +30,7 @@ int main()
     host_info.ai_socktype = SOCK_STREAM;
     host_info.ai_flags = AI_PASSIVE;
 
-    status = getaddrinfo(NULL, "5555", &host_info, &host_info_list);
+    status = getaddrinfo("localhost", "5555", &host_info, &host_info_list);
     if (status != 0)  std::cout << "getaddrinfo error" << gai_strerror(status) ;
 
     std::cout << "Creating socket..."  << std::endl;
