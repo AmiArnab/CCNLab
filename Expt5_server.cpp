@@ -1,10 +1,16 @@
 #include <iostream>
-#include <thread>
 #include <vector>
 #include <algorithm>
+#include <pthread.h>
 #include "setupserver.h"
 
 using namespace std;
+
+typedef struct{
+    int cfd;
+    int N;
+    bool sendreq;
+} ThreadArg;
 
 int sendPkt(int fd, int *count, int N)
 {
@@ -38,32 +44,34 @@ int sendPkt(int fd, uint32_t val)  //Overladed function
     return 0;
 }
 
-int sendData(int fd,int N,bool *sendreq)
+void *sendData(void *myarg)
 {
+    ThreadArg *arg = (ThreadArg*)myarg;
     int count=1;
     while(count < 50)
     {
-        if(*sendreq == true)
+        if(arg->sendreq == true)
         {
             cout << "\n----------\n";
-            sendPkt(fd,&count,N);
+            sendPkt(arg->cfd,&count,arg->N);
             cout << "\n----------\n";
-            *sendreq = false;
+            arg->sendreq = false;
         }
-
     }
-    return 0;
 }
 
-int recvACK(int fd, int N, bool *sendreq)
+void *recvACK(void *myarg)
 {
+    ThreadArg *arg = (ThreadArg *)myarg;
+    int fd = arg->cfd;
+
     fd_set client_fdset;
-    uint32_t pkt = 0, oldpkt = 0;
+    uint32_t pkt = 0;
     vector<uint32_t> buf;
     int windowcount = 0;
 
     timespec timeout;
-    timeout.tv_sec = 1*N;
+    timeout.tv_sec = 1*arg->N;
     timeout.tv_nsec = 0;
 
     while(true)
@@ -73,9 +81,8 @@ int recvACK(int fd, int N, bool *sendreq)
 
         pselect(fd+1,&client_fdset,NULL,NULL,&timeout,NULL);
 
-        if(FD_ISSET(fd,&client_fdset) && (windowcount < 5))
+        if(FD_ISSET(fd,&client_fdset) && (windowcount < arg->N))
         {
-            oldpkt = pkt;
             int readlen = recv(fd,&pkt,sizeof(uint32_t),0);
             if(readlen==0)
             {
@@ -94,54 +101,49 @@ int recvACK(int fd, int N, bool *sendreq)
                 }
             }
             windowcount++;
-            //cout << "Window Count: " << windowcount << endl;
         }
         else
         {
-            //cout << "Ok! 1.1\n";
-            //*sendreq = false;
-            for(int i = 0; i < buf.size();++i)
+            for(unsigned int i = 0; i < buf.size();++i)
             {
                 uint32_t resend = *(buf.begin());
                 sendPkt(fd,resend);
                 buf.erase(buf.begin());
             }
-            *sendreq = true;
+            arg->sendreq = true;
             windowcount = 0;
             pselect(fd+1,&client_fdset,NULL,NULL,&timeout,NULL);
-            //cout << "Ok! 1.2\n";
         }
-        //cout << "Ok! 2.0\n";
     }
-    return 0;
 }
 
 int main()
 {
     int serversocket = 0, clientsocket = 0;
-    int N = 5;
-    int *reqsend = new int;
-    bool *sendreq = new bool;
 
-    *reqsend = 0;
-    *sendreq = true;
+    ThreadArg arg;
+    arg.N = 5;
+    arg.sendreq = true;
+
+    pthread_t senddata, recvack;
+    pthread_attr_t attr;
 
     cout << "Starting server..." << endl;
     setUpServer(&serversocket,&clientsocket);
     cout << "Connected!\n";
 
-    thread SendData(sendData,clientsocket,N,sendreq);
-    thread RecvACK(recvACK,clientsocket,N,sendreq);
+    arg.cfd = clientsocket;
 
-    SendData.join();
-    RecvACK.join();
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
+    pthread_create(&senddata,&attr,sendData,(void*)(&arg));
+    pthread_create(&recvack,&attr,recvACK,(void*)(&arg));
+    pthread_join(senddata,NULL);
+    pthread_join(recvack,NULL);
+    pthread_exit(NULL);
 
     close(clientsocket);
     close(serversocket);
 
-    delete reqsend;
-    delete sendreq;
-
     return 0;
 }
-
