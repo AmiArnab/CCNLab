@@ -2,7 +2,6 @@
 #include <cstring>
 #include <sys/socket.h>
 #include <netdb.h>
-#include <cstdio>
 #include <cstdlib>
 #include <unistd.h>
 #include <arpa/inet.h>
@@ -10,9 +9,16 @@
 #include <sys/types.h>
 #include <sys/select.h>
 #include <netinet/in.h>
-#include <thread>
+#include <pthread.h>
 
 using namespace std;
+
+typedef struct {
+    int cfd;
+    bool ackrcvd;
+    int lastACK;
+    int lastSent;
+} ThreadArg;
 
 int setUpServer(int *serversocket=NULL,int *clientsocket=NULL)
 {
@@ -27,7 +33,7 @@ int setUpServer(int *serversocket=NULL,int *clientsocket=NULL)
     host_info.ai_socktype = SOCK_STREAM;
     host_info.ai_flags = AI_PASSIVE;
 
-    getaddrinfo(NULL, "5555", &host_info, &host_info_list);
+    getaddrinfo("localhost", "5555", &host_info, &host_info_list);
 
     int socketfd;
     socketfd = socket(host_info_list->ai_family, host_info_list->ai_socktype,host_info_list->ai_protocol);
@@ -41,14 +47,13 @@ int setUpServer(int *serversocket=NULL,int *clientsocket=NULL)
 
     while(true)
     {
-        int act=0;
         sockaddr their_addr;
         socklen_t addr_size = sizeof(their_addr);
 
         FD_ZERO(&client_fdset);
         FD_SET(socketfd,&client_fdset);
 
-        act = pselect(socketfd+1,&client_fdset,NULL,NULL,NULL,NULL);
+        pselect(socketfd+1,&client_fdset,NULL,NULL,NULL,NULL);
 
         if(FD_ISSET(socketfd,&client_fdset))
         {
@@ -85,26 +90,31 @@ void sendPackets(int N,int fd,int *count)
     cout << "Sent " << N << " packets!\n---------------------\n";
 }
 
-int sendData(int fd, bool *ackreceived, int *lastSent, int *lastACK)
+void *sendData(void *myarg)
 {
+    ThreadArg *arg = (ThreadArg *)myarg;
+    int fd = arg->cfd;
+
     const int N=5;
     int count = 1;
 
     while(count < 100)
     {
-        if(*ackreceived)
+        if(arg->ackrcvd)
         {
-            count = *lastACK + 1;
+            count = arg->lastACK + 1;
             sendPackets(N,fd,&count);
-            *lastSent = count-1;
-            *ackreceived = false;
+            arg->lastSent = count - 1;
+            arg->ackrcvd = false;
         }
     }
-    return 0;
 }
 
-int recvACK(int fd,bool *ackreceived, int *lastSent, int *lastACK)
+void *recvACK(void *myarg)
 {
+    ThreadArg *arg = (ThreadArg *)myarg;
+    int fd = arg->cfd;
+
     fd_set client_fdset;
     const int N=5;
     uint32_t pkt = 0, oldpkt = 0;
@@ -135,7 +145,7 @@ int recvACK(int fd,bool *ackreceived, int *lastSent, int *lastACK)
             }
             if((oldpkt+1) == pkt)
             {
-                *lastACK = pkt;
+                arg->lastACK = pkt;
             }
             else
             {
@@ -144,36 +154,36 @@ int recvACK(int fd,bool *ackreceived, int *lastSent, int *lastACK)
         }
         else
         {
-            cout << "---------------\nlastSent: " << *lastSent << " lastACK: " << *lastACK << "\n----------------\n";
-            oldpkt = *lastACK;
-            *ackreceived = true;
+            cout << "-------------\nLast Sent: " << arg->lastSent << " Last ACK: " << arg->lastACK << "\n--------------\n";
+            oldpkt = arg->lastACK;
+            arg->ackrcvd = true;
         }
     }
-
-    return 0;
 }
 
 int main()
 {   
-    bool *ackrcvd = new bool;
-    int *lastACK = new int;
-    int *lastSent = new int;
-    *ackrcvd = true;
-    *lastSent = 0;
-    *lastACK = 0;
+    ThreadArg arg;
+    arg.ackrcvd = true;
+    arg.lastACK = 0;
+    arg.lastSent = 0;
+
     int srvrfd, cfd;
+    pthread_t sendpkt,recvack;
+    pthread_attr_t attr;
 
     cout << "------SERVER-------\n";
 
     setUpServer(&srvrfd,&cfd);
+    arg.cfd = cfd;
 
-    thread SendPkt(sendData,cfd,ackrcvd,lastSent,lastACK);
-    thread RecvAck(recvACK,cfd,ackrcvd,lastSent,lastACK);
-    SendPkt.join();
-    RecvAck.join();
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_JOINABLE);
+    pthread_create(&sendpkt,&attr,sendData,(void*)(&arg));
+    pthread_create(&recvack,&attr,recvACK,(void*)(&arg));
+    pthread_join(sendpkt,NULL);
+    pthread_join(recvack,NULL);
+    pthread_exit(NULL);
 
-    delete ackrcvd;
-    delete lastACK;
-    delete lastSent;
     return 0 ;
 }
