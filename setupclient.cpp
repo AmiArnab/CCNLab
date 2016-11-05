@@ -12,7 +12,7 @@ int setUpClient(int *clientfd)
     host_info.ai_socktype = SOCK_STREAM;
     host_info.ai_flags = AI_PASSIVE;
 
-    status = getaddrinfo(NULL, "5555", &host_info, &host_info_list);
+    status = getaddrinfo("localhost", "5555", &host_info, &host_info_list);
     int socketfd;
     socketfd = socket(host_info_list->ai_family, host_info_list->ai_socktype,host_info_list->ai_protocol);
     int yes = 1;
