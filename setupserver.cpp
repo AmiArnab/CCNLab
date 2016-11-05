@@ -15,7 +15,7 @@ int setUpServer(int *serversocket,int *clientsocket)
     host_info.ai_socktype = SOCK_STREAM;
     host_info.ai_flags = AI_PASSIVE;
 
-    getaddrinfo(NULL, "5555", &host_info, &host_info_list);
+    getaddrinfo("localhost", "5555", &host_info, &host_info_list);
 
     int socketfd;
     socketfd = socket(host_info_list->ai_family, host_info_list->ai_socktype,host_info_list->ai_protocol);
